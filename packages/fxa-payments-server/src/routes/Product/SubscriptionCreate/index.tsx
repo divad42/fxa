@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, Suspense } from 'react';
 import { Stripe, StripeCardElement, StripeError } from '@stripe/stripe-js';
 import { Plan, Profile, Customer } from '../../../store/types';
 import { State as ValidatorState } from '../../../lib/validator';
@@ -48,6 +48,8 @@ export type SubscriptionCreateProps = {
   apiClientOverrides?: Partial<SubscriptionCreateAuthServerAPIs>;
 };
 
+const PaypalButton = React.lazy(() => import('../../Product/PayPalButton'));
+
 export const SubscriptionCreate = ({
   isMobile,
   profile,
@@ -61,6 +63,21 @@ export const SubscriptionCreate = ({
 }: SubscriptionCreateProps) => {
   const [submitNonce, refreshSubmitNonce] = useNonce();
 
+  useEffect(() => {
+    if (!config.featureFlags.usePaypalUIByDefault) {
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = `https://www.paypal.com/sdk/js?client-id=${config.paypal.clientId}&vault=true&commit=false&intent=authorize&disable-funding=credit,card`;
+    script.onload = () => {
+      setPaypalScriptLoaded(true);
+    };
+    script.onerror = () => {
+      throw new Error('Paypal SDK could not be loaded.');
+    };
+    document.body.appendChild(script);
+  }, []);
+
   const onFormMounted = useCallback(
     () => Amplitude.createSubscriptionMounted(selectedPlan),
     [selectedPlan]
@@ -70,6 +87,8 @@ export const SubscriptionCreate = ({
     () => Amplitude.createSubscriptionEngaged(selectedPlan),
     [selectedPlan]
   );
+
+  const [paypalScriptLoaded, setPaypalScriptLoaded] = useState(false);
 
   const [inProgress, setInProgress] = useState(false);
 
@@ -162,10 +181,11 @@ export const SubscriptionCreate = ({
             )}
           </ErrorMessage>
 
-          {config.featureFlags.usePaypalUIByDefault ? (
-            // To be updated in issue #7097
-            <div id="paypal-button-container"></div>
-          ) : null}
+          {paypalScriptLoaded && (
+            <Suspense fallback={<div>Loading...</div>}>
+              <PaypalButton />
+            </Suspense>
+          )}
 
           <PaymentForm
             {...{
